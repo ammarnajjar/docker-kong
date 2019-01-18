@@ -1,0 +1,55 @@
+version: '3.5'
+
+services:
+  kong-database:
+    build: ./kong-database
+    container_name: kong-database
+    networks:
+      kong-network:
+    volumes:
+      - ./db-kong:/var/lib/cassandra
+    ports:
+      - 9042:9042
+
+  kong-database-migrations:
+    build: ./kong-database-migrations
+    container_name: kong-database-migrations
+    networks:
+      kong-network:
+    depends_on:
+      - kong-database
+    environment:
+      - KONG_DATABASE=cassandra
+      - KONG_PG_HOST=kong-database
+      - KONG_CASSANDRA_CONTACT_POINTS=kong-database
+    command: ['./wait-for-db-and-migrate.sh']
+
+  kong:
+    build: ./kong
+    container_name: kong
+    networks:
+      kong-network:
+    depends_on:
+      - kong-database
+      - kong-database-migrations
+    environment:
+      - KONG_DATABASE=cassandra
+      - KONG_PG_HOST=kong-database
+      - KONG_CASSANDRA_CONTACT_POINTS=kong-database
+      - KONG_PROXY_ACCESS_LOG=/dev/stdout
+      - KONG_ADMIN_ACCESS_LOG=/dev/stdout
+      - KONG_PROXY_ERROR_LOG=/dev/stderr
+      - KONG_ADMIN_ERROR_LOG=/dev/stderr
+      - KONG_ADMIN_LISTEN=0.0.0.0:8001
+      - KONG_ADMIN_LISTEN_SSL=0.0.0.0:8444
+    ports:
+      - 8000:8000
+      - 8443:8443
+      - 8001:8001
+      - 8444:8444
+    command: ['./wait-for-stop.sh', '-h', 'kong-database-migrations', '--', 'kong', 'start']
+
+networks:
+  kong-network:
+    name: kong-network
+    driver: bridge
