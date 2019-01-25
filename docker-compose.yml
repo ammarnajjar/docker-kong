@@ -1,53 +1,65 @@
 version: '3.5'
 
 services:
-  kong-database:
-    build: ./kong-database
-    container_name: kong-database
-    networks:
-      kong-network:
-    volumes:
-      - ./db-kong:/var/lib/cassandra
-    ports:
-      - 9042:9042
-
-  kong-database-migrations:
-    build: ./kong-database-migrations
-    container_name: kong-database-migrations
-    networks:
-      kong-network:
+  kong-migrations:
+    image: kong:1.0-centos
+    command: kong migrations bootstrap
     depends_on:
-      - kong-database
+      - db
     environment:
-      - KONG_DATABASE=cassandra
-      - KONG_PG_HOST=kong-database
-      - KONG_CASSANDRA_CONTACT_POINTS=kong-database
-    command: ['./wait-for-db-and-migrate.sh']
-
+      KONG_DATABASE: postgres
+      KONG_PG_DATABASE: ${KONG_PG_DATABASE:-kong}
+      KONG_PG_HOST: db
+      KONG_PG_PASSWORD: kong
+      KONG_PG_USER: kong
+    networks:
+      - kong-network
+    links:
+      - db:db
+    command: bash -c 'kong migrations bootstrap && kong migrations reset -y && kong migrations bootstrap && kong migrations up'
+    restart: on-failure
   kong:
-    build: ./kong
-    container_name: kong
-    networks:
-      kong-network:
+    image: kong
     depends_on:
-      - kong-database
-      - kong-database-migrations
+      - db
     environment:
-      - KONG_DATABASE=cassandra
-      - KONG_PG_HOST=kong-database
-      - KONG_CASSANDRA_CONTACT_POINTS=kong-database
-      - KONG_PROXY_ACCESS_LOG=/dev/stdout
-      - KONG_ADMIN_ACCESS_LOG=/dev/stdout
-      - KONG_PROXY_ERROR_LOG=/dev/stderr
-      - KONG_ADMIN_ERROR_LOG=/dev/stderr
-      - KONG_ADMIN_LISTEN=0.0.0.0:8001
-      - KONG_ADMIN_LISTEN_SSL=0.0.0.0:8444
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: '0.0.0.0:8001'
+      KONG_CASSANDRA_CONTACT_POINTS: db
+      KONG_DATABASE: postgres
+      KONG_PG_DATABASE: ${KONG_PG_DATABASE:-kong}
+      KONG_PG_HOST: db
+      KONG_PG_PASSWORD: kong
+      KONG_PG_USER: kong
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+    networks:
+      - kong-network
+    links:
+      - db:db
     ports:
-      - 8000:8000
-      - 8443:8443
-      - 8001:8001
-      - 8444:8444
-    command: ['./wait-for-stop.sh', '-h', 'kong-database-migrations', '--', 'kong', 'start']
+      - '8000:8000/tcp'
+      - '8001:8001/tcp'
+      - '8443:8443/tcp'
+      - '8444:8444/tcp'
+    restart: on-failure
+  db:
+    image: postgres:9.5
+    environment:
+      POSTGRES_DB: ${KONG_PG_DATABASE:-kong}
+      POSTGRES_PASSWORD: kong
+      POSTGRES_USER: kong
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', '${KONG_PG_USER:-kong}']
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    restart: on-failure
+    networks:
+      - kong-network
+    stdin_open: true
+    tty: true
 
 networks:
   kong-network:
