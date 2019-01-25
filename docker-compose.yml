@@ -3,7 +3,6 @@ version: '3.5'
 services:
   kong-migrations:
     image: kong:1.0-centos
-    command: kong migrations bootstrap
     depends_on:
       - db
     environment:
